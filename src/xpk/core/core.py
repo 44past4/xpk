@@ -89,6 +89,7 @@ class CapacityType(enum.Enum):
   ON_DEMAND = 'on_demand'
   RESERVATION = 'reservation'
   SPOT = 'spot'
+  FLEX_START = 'flex_start'
   UNKNOWN = 'unknown'
 
 
@@ -597,6 +598,9 @@ def get_capacity_type(args) -> tuple[CapacityType, int]:
   if args.spot:
     capacity_type = CapacityType.SPOT
     num_types += 1
+  if args.flex_start:
+    capacity_type = CapacityType.FLEX_START
+    num_types += 1
 
   # Check that the number of user arguments provided is valid.
   if num_types == 0:
@@ -604,8 +608,8 @@ def get_capacity_type(args) -> tuple[CapacityType, int]:
   elif num_types != 1:
     xpk_print(
         'ERROR: User specified more than one of the following arguments. Please'
-        ' specify only one of `--reservation=$RESERVATION_NAME`, `--on-demand`'
-        ' or `--spot`.'
+        ' specify only one of `--reservation=$RESERVATION_NAME`, `--on-demand`,'
+        ' `--flex-start` or `--spot`.'
     )
     return_code = 1
 
@@ -615,7 +619,7 @@ def get_capacity_type(args) -> tuple[CapacityType, int]:
 def get_capacity_arguments_from_capacity_type(
     args, capacity_type: CapacityType
 ) -> tuple[str, int]:
-  """Determine the TPU Nodepool creation capacity arguments needed.
+  """Determine the Nodepool creation capacity arguments needed.
 
   Args:
     args: user provided arguments for running the command.
@@ -633,6 +637,12 @@ def get_capacity_arguments_from_capacity_type(
       capacity_args = ''
     case CapacityType.SPOT:
       capacity_args = '--spot'
+    case CapacityType.FLEX_START:
+      capacity_args = (
+          '--enable-queued-provisioning --enable-autoscaling'
+          ' --enable-autoscaling --location-policy=ANY'
+          ' --reservation-affinity=none --no-enable-autorepair --max-nodes=1000'
+      )
     case CapacityType.RESERVATION:
       capacity_args = (
           f'--reservation-affinity=specific --reservation={args.reservation}'
@@ -667,6 +677,8 @@ def get_capacity_node_selectors_from_capacity_type(
       node_selector = ''
     case CapacityType.SPOT.name:
       node_selector = 'cloud.google.com/gke-spot="true"'
+    case CapacityType.FLEX_START.name:
+      node_selector = 'cloud.google.com/gke-queued="true"'
     case CapacityType.RESERVATION.name:
       node_selector = f'cloud.google.com/reservation-name: {args.reservation}'
     case _:
@@ -1153,8 +1165,9 @@ def run_gke_node_pool_create_command(
     return_code = print_reservations(args)
     xpk_print(
         'ERROR: User needs to provide the capacity type. Please specify one of'
-        ' the following `--reservation=$RESERVATION_NAME`, `--on-demand`'
-        ' or `--spot`. See the above list of reservations to choose from.'
+        ' the following `--reservation=$RESERVATION_NAME`, `--on-demand`,'
+        ' `--flex-start` or `--spot`. See the above list of reservations to'
+        ' choose from.'
     )
     if return_code > 0:
       xpk_print('Listing all reservations failed!')
@@ -1290,7 +1303,10 @@ def run_gke_node_pool_create_command(
     )
     if system.accelerator_type == AcceleratorType['TPU']:
       command += f' --node-version={gke_node_pool_version}'
-      command += f' --num-nodes={system.vms_per_slice}'
+      if capacity_type == CapacityType.FLEX_START:
+        command += f' --num-nodes=0'
+      else:
+        command += f' --num-nodes={system.vms_per_slice}'
       command += ' --placement-type=COMPACT  --max-pods-per-node 15'
       command += (
           f' --scopes=storage-full,gke-default,{CLOUD_PLATFORM_AUTH_SCOPE_URL}'
@@ -1299,7 +1315,10 @@ def run_gke_node_pool_create_command(
       command += f' {args.custom_tpu_nodepool_arguments}'
     elif system.accelerator_type == AcceleratorType['GPU']:
       subnet_prefix = f'{args.cluster}-{zone_to_region(args.zone)}'
-      command += f' --num-nodes={args.num_nodes}'
+      if capacity_type == CapacityType.FLEX_START:
+        command += f' --num-nodes=0'
+      else:
+        command += f' --num-nodes={args.num_nodes}'
       command += (
           ' --accelerator'
           f' type={system.gke_accelerator},count={str(system.chips_per_vm)},gpu-driver-version=latest'
@@ -1326,7 +1345,10 @@ def run_gke_node_pool_create_command(
             ' --max-pods-per-node=32'
         )
     elif system.accelerator_type == AcceleratorType['CPU']:
-      command += f' --num-nodes={system.vms_per_slice}'
+      if capacity_type == CapacityType.FLEX_START:
+        command += f' --num-nodes=0'
+      else:
+        command += f' --num-nodes={system.vms_per_slice}'
       command += (
           f' --scopes=storage-full,gke-default,{CLOUD_PLATFORM_AUTH_SCOPE_URL}'
       )
