@@ -26,6 +26,14 @@ def set_shell_parser(shell_parser: argparse.ArgumentParser) -> None:
   add_shared_arguments(shell_optional_arguments)
   shell_parser.set_defaults(func=shell)
 
+  shell_optional_arguments.add_argument(
+      '--cluster',
+      type=str,
+      default=None,
+      help='The name of the cluster.',
+      required=False,
+  )
+
   shell_subcommands = shell_parser.add_subparsers(
       title='shell subcommands',
       dest='xpk_shell_subcommands',
